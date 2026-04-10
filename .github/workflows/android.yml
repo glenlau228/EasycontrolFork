@@ -21,12 +21,13 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # === 修复 1: 构建 server 模块并放入 raw 资源 ===
-      - name: Build server module and prepare raw resource
+      # === 修复 1: 构建 server 模块并放入 raw 资源（使用项目自带 task）===
+      - name: Build server and copy to raw resources
         working-directory: ./easycontrol
         run: |
           chmod +x gradlew
-          ./gradlew :server:assembleRelease --no-daemon
+          #./gradlew :server:assembleRelease --no-daemon
+          ./gradlew :server:copyRelease --no-daemon
           mkdir -p app/src/main/res/raw
           cp server/build/outputs/aar/server-release.aar app/src/main/res/raw/easycontrol_server.jar
 
