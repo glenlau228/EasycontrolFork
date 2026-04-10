@@ -12,12 +12,55 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          lfs: false
+          lfs: false               # 如果仓库使用 Git LFS 且 gradlew 是 LFS 文件，改为 true
           token: ${{ github.token }}
 
-      - name: Force executable permission for gradlew
+      # 调试：确认检出内容和 Git 状态
+      - name: Debug checkout content
         run: |
-          chmod +x gradlew gradlew.bat 2>/dev/null || true
+          echo "Current working directory: $(pwd)"
+          echo "Current branch: $(git branch --show-current)"
+          echo "Last commit:"
+          git log -1 --oneline
+          echo "Root directory files:"
+          ls -la
+          echo "Files tracked by Git (first 20):"
+          git ls-files | head -20
+          echo "Check gradlew in Git tree:"
+          git ls-tree HEAD | grep -E "gradlew|gradle" || echo "No gradlew found in Git index"
+
+      # 强制生成 gradlew 如果缺失（解决 wrapper 未提交的情况）
+      - name: Ensure Gradle Wrapper exists
+        run: |
+          if [ ! -f gradlew ]; then
+            echo "⚠️ gradlew not found, generating one..."
+            mkdir -p gradle/wrapper
+            # 下载 gradle-wrapper.jar（使用 Gradle 8.0）
+            curl -L -o gradle/wrapper/gradle-wrapper.jar https://raw.githubusercontent.com/gradle/gradle/v8.0.0/gradle/wrapper/gradle-wrapper.jar
+            # 创建 gradle-wrapper.properties
+            cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-bin.zip
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+EOF
+            # 创建 gradlew (Unix)
+            cat > gradlew << 'EOF'
+#!/bin/sh
+exec java -cp "$(dirname "$0")/gradle/wrapper/gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain "$@"
+EOF
+            chmod +x gradlew
+            # 创建 gradlew.bat (Windows)
+            cat > gradlew.bat << 'EOF'
+@if "%DEBUG%" == "" @echo off
+java -cp "%~dp0\gradle\wrapper\gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain %*
+EOF
+            echo "✅ Gradle wrapper generated"
+          else
+            echo "✅ gradlew already exists"
+            chmod +x gradlew gradlew.bat 2>/dev/null || true
+          fi
           ls -la gradlew*
 
       - name: Verify gradlew and Java
@@ -44,13 +87,13 @@ jobs:
           ls -la app/ 2>/dev/null || echo "No app/ dir"
           echo "🔍 settings.gradle:"
           cat settings.gradle 2>/dev/null || echo "No settings.gradle"
-          echo "🔍 app/build.gradle:"
+          echo "🔍 app/build.gradle (application plugin check):"
           grep -n "applicationId\|com.android.application" app/build.gradle 2>/dev/null || echo "No applicationId or application plugin found!"
 
       - name: Clean Project
         run: ./gradlew clean --no-daemon
 
-      # ✅ 关键：尝试多种 assemble 命令，自动探测模块名
+      # 稳健构建：尝试多种 assemble 任务
       - name: Build Debug APK (robust)
         run: |
           echo "Trying :app:assembleDebug..."
@@ -88,11 +131,13 @@ jobs:
           exit 1
 
       - name: Verify APK exists (aggressive search)
+        id: find_apk
         run: |
           echo "🔍 Searching ALL APKs in workspace..."
           find . -name "*.apk" -type f -exec ls -lh {} \;
           
-          # Check standard paths
+          # 标准路径列表
+          APK_PATH=""
           for path in \
             "app/build/outputs/apk/debug/app-debug.apk" \
             "app/build/outputs/apk/debug/*.apk" \
@@ -100,9 +145,9 @@ jobs:
             "**/debug/*.apk" \
             "**/*debug*.apk"; do
             if ls $path >/dev/null 2>&1; then
-              echo "✅ Found APK: $path"
-              ls -lh $path
-              export APK_PATH="$path"
+              APK_PATH=$(ls $path | head -1)
+              echo "✅ Found APK: $APK_PATH"
+              ls -lh "$APK_PATH"
               break
             fi
           done
@@ -114,6 +159,7 @@ jobs:
             echo "  3. build failed silently (check previous step logs)"
             exit 1
           fi
+          echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
