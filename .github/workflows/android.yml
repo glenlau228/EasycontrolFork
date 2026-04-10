@@ -21,60 +21,66 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Make gradlew executable
-        run: chmod +x "$GITHUB_WORKSPACE/gradlew"
-
-      - name: Auto-detect and fix source location
+      - name: Verify project structure
         run: |
-          # Find where Java source files actually are
-          JAVA_SRC_PATH=$(find . -name "*.java" -path "*/src/main/java/*" -exec dirname {} \; | head -n 1 | xargs dirname | xargs dirname | xargs dirname)
-          
-          if [ "$JAVA_SRC_PATH" != "./app" ]; then
-            echo "Found Java sources at: $JAVA_SRC_PATH"
-            echo "Moving sources to app/src/main/java/"
-            
-            # Create app directory if it doesn't exist
-            mkdir -p app/src/main/java
-            
-            # Move all Java source files
-            if [ -d "$JAVA_SRC_PATH/src/main/java" ]; then
-              cp -r "$JAVA_SRC_PATH/src/main/java/"* app/src/main/java/
-            fi
-            
-            # Copy other necessary source files
-            for dir in res assets manifest; do
-              if [ -d "$JAVA_SRC_PATH/src/main/$dir" ]; then
-                mkdir -p app/src/main/$dir
-                cp -r "$JAVA_SRC_PATH/src/main/$dir/"* app/src/main/$dir/
-              fi
-            done
-            
-            # Copy AndroidManifest.xml if it's in the original location
-            if [ -f "$JAVA_SRC_PATH/src/main/AndroidManifest.xml" ]; then
-              cp "$JAVA_SRC_PATH/src/main/AndroidManifest.xml" app/src/main/
+          echo "📁 Workspace: $GITHUB_WORKSPACE"
+          ls -la
+          echo "🔍 Checking for gradlew..."
+          find . -name "gradlew" -type f
+
+      - name: Make gradlew executable
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/gradlew" ]; then
+            chmod +x "$GITHUB_WORKSPACE/gradlew"
+            echo "✅ gradlew made executable"
+          else
+            echo "❌ gradlew not found at root. Trying ./app/gradlew..."
+            if [ -f "$GITHUB_WORKSPACE/app/gradlew" ]; then
+              chmod +x "$GITHUB_WORKSPACE/app/gradlew"
+              echo "✅ app/gradlew made executable"
+            else
+              echo "ERROR: No gradlew found! Expected at root or app/"
+              exit 1
             fi
           fi
 
-      - name: Ensure correct build configuration
+      - name: Ensure settings.gradle includes :app
         run: |
-          # Ensure app/build.gradle has proper configuration
-          if [ -f "app/build.gradle" ]; then
-            # Add sourceSets if not present
-            if ! grep -q "sourceSets" app/build.gradle; then
-              sed -i '/android {/a \
-          sourceSets {\
-              main {\
-                  java.srcDirs = ["src/main/java"]\
-              }\
-          }' app/build.gradle
+          if [ -f settings.gradle ]; then
+            if ! grep -q "include.*:app" settings.gradle; then
+              echo "include ':app'" >> settings.gradle
+              echo "✅ Added ':app' to settings.gradle"
             fi
+          elif [ -f settings.gradle.kts ]; then
+            if ! grep -q "include.*\"app\"" settings.gradle.kts; then
+              echo "include(\":app\")" >> settings.gradle.kts
+              echo "✅ Added ':app' to settings.gradle.kts"
+            fi
+          else
+            echo "Creating minimal settings.gradle..."
+            echo "include ':app'" > settings.gradle
           fi
 
       - name: Clean and build
-        run: "$GITHUB_WORKSPACE/gradlew" clean :app:assembleDebug --no-daemon --info
+        run: |
+          # Use absolute path to gradlew
+          GRADLEW="$GITHUB_WORKSPACE/gradlew"
+          if [ ! -f "$GRADLEW" ]; then
+            GRADLEW="$GITHUB_WORKSPACE/app/gradlew"
+          fi
+          if [ -f "$GRADLEW" ]; then
+            echo "🚀 Running: $GRADLEW clean :app:assembleDebug --no-daemon --info"
+            "$GRADLEW" clean :app:assembleDebug --no-daemon --info
+          else
+            echo "FATAL: gradlew not found after all checks"
+            exit 1
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: easycontrol-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/mapping/debug/mapping.txt
