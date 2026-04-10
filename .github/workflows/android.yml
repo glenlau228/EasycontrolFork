@@ -1,52 +1,35 @@
-name: Build EasyControl APK (Fixed Permissions)
+name: Build EasyControl APK
 
 on:
-  workflow_dispatch:
   push:
+    branches: [ "main", "master" ]
+  pull_request:
     branches: [ "main", "master" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          # 👇 关键！让 Git 保留可执行权限
-          lfs: false
-          token: ${{ github.token }}
 
-      - name: Force executable permission for gradlew
-        run: |
-          # 即使文件无 x 权限，也强制添加
-          touch gradlew 2>/dev/null || true
-          chmod +x gradlew gradlew.bat || echo "Ignoring chmod errors..."
-
-      - name: Verify gradlew exists and is executable
-        run: |
-          ls -la gradlew*
-          test -x gradlew && echo "✅ gradlew is executable" || echo "⚠️ Still not executable"
-          ./gradlew --version 2>&1 | head -n 2
-
-      - name: Check gradlew
-        run: ls -la ./gradlew && head -n 5 ./gradlew
-
-      - name: Set up JDK 17
+      - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '11'
           distribution: 'temurin'
+          cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          sdk-tools: "platform-tools;34.0.0,build-tools;34.0.0,platforms;android-34"
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./easycontrol/gradlew
 
       - name: Build Debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        working-directory: ./easycontrol
+        run: ./gradlew assembleDebug --no-daemon
 
-      - name: Upload APK
+      - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: easycontrol-debug.apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: easycontrol-debug-apk
+          path: easycontrol/app/build/outputs/apk/debug/app-debug.apk
