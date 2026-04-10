@@ -43,32 +43,18 @@ jobs:
       - name: Clean Project
         run: ./gradlew clean --no-daemon
 
-      - name: Build Debug APK (with clean)
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+		- name: Build Debug APK
+		  run: ./gradlew :app:assembleDebug --no-daemon --stacktrace --rerun-tasks
 
-      # 🔍 新增：验证 APK 是否真的生成
-      - name: Verify APK exists
-        run: |
-          echo "🔍 Searching for APK files..."
-          find . -name "*.apk" -exec ls -lh {} \;
-          
-          # 检查默认路径
-          if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
-            echo "✅ Found APK at: app/build/outputs/apk/debug/app-debug.apk"
-            ls -lh app/build/outputs/apk/debug/app-debug.apk
-          else
-            echo "❌ Default APK path not found"
-            # 搜索其他可能的路径
-            find app/build/outputs -name "*.apk" 2>/dev/null || echo "No APK found in app/build/outputs"
-          fi
+		- name: Verify APK/AAB exists
+		  run: |
+			echo "🔍 Searching for build outputs..."
+			find app/build/outputs -type f \( -name "*.apk" -o -name "*.aab" \) -exec ls -lh {} \;
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: easycontrol-debug
-          # ✅ 改进路径匹配，增加容错性
-          path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/debug/*.apk
-            **/app-debug.apk
-            **/*debug*.apk
+		- name: Upload APK/AAB
+		  uses: actions/upload-artifact@v4
+		  with:
+			name: easycontrol-debug
+			path: |
+			  app/build/outputs/apk/**/*.apk
+			  app/build/outputs/bundle/**/*.aab
