@@ -1,167 +1,49 @@
-name: Android CI
+name: Build EasyControl APK (Fixed Permissions)
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+    branches: [ "main", "master" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # 👇 关键！让 Git 保留可执行权限
+          lfs: false
+          token: ${{ github.token }}
 
-    - name: Debug - Show directory structure
-      run: |
-        pwd
-        echo "=== Root directory contents ==="
-        ls -la
-        echo "=== All gradlew related files ==="
-        find . -type f -name "*gradlew*" 2>/dev/null || echo "No gradlew files found"
-        echo "=== All .gradle directories ==="
-        find . -type d -name ".gradle" 2>/dev/null || echo "No .gradle directories found"
-        echo "=== All build.gradle files ==="
-        find . -type f -name "build.gradle*" 2>/dev/null || echo "No build.gradle files found"
-        echo "=== All gradle wrapper properties ==="
-        find . -type f -name "gradle-wrapper.properties" 2>/dev/null || echo "No gradle-wrapper.properties found"
+      - name: Force executable permission for gradlew
+        run: |
+          # 即使文件无 x 权限，也强制添加
+          touch gradlew 2>/dev/null || true
+          chmod +x gradlew gradlew.bat || echo "Ignoring chmod errors..."
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: gradle
+      - name: Verify gradlew exists and is executable
+        run: |
+          ls -la gradlew*
+          test -x gradlew && echo "✅ gradlew is executable" || echo "⚠️ Still not executable"
+          ./gradlew --version 2>&1 | head -n 2
 
-    - name: Create gradlew if missing
-      run: |
-        # 检查是否有 gradle wrapper 配置文件
-        if [ -f "gradle/wrapper/gradle-wrapper.properties" ] || [ -n "$(find . -name "gradle-wrapper.properties" -type f)" ]; then
-          echo "Found gradle wrapper configuration, checking for gradlew..."
-          
-          # 如果在根目录没有找到 gradlew，则创建它
-          if [ ! -f "./gradlew" ]; then
-            echo "#!/bin/sh" > gradlew
-            echo "exec java -jar gradle/wrapper/gradle-wrapper.jar \"\$@\"" >> gradlew
-            chmod +x gradlew
-            echo "Created temporary gradlew script"
-          fi
-        else
-          echo "No gradle wrapper configuration found in repository"
-          # 检查是否有 build.gradle 文件，如果有则初始化 gradle wrapper
-          if [ -n "$(find . -name "build.gradle" -type f | head -n 1)" ]; then
-            echo "Found build.gradle file, initializing gradle wrapper..."
-            # 创建最小化的 gradlew 脚本
-            curl -sL https://raw.githubusercontent.com/gradle/gradle/master/subprojects/plugins/src/main/resources/org/gradle/api/internal/plugins/unixStartScript.txt > gradlew
-            chmod +x gradlew
-          else
-            echo "No build.gradle files found either"
-            exit 1
-          fi
-        fi
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-    - name: Alternative: Initialize Gradle Wrapper
-      run: |
-        # 检查项目根目录是否有 build.gradle
-        BUILD_GRADLE_FOUND=$(find . -maxdepth 2 -name "build.gradle" -type f -not -path "./.*" | head -n 1)
-        
-        if [ -n "$BUILD_GRADLE_FOUND" ]; then
-          echo "Build.gradle found at: $BUILD_GRADLE_FOUND"
-          
-          # 如果没有 gradlew，但有 build.gradle，则初始化
-          if [ ! -f "./gradlew" ]; then
-            # 创建一个简单的 gradlew 脚本
-            cat > gradlew << 'EOF'
-#!/bin/sh
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          sdk-tools: "platform-tools;34.0.0,build-tools;34.0.0,platforms;android-34"
 
-# Locate gradle wrapper jar
-WRAPPER_JAR_PATH=$(find . -name "gradle-wrapper.jar" -type f | head -n 1)
+      - name: Build Debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
-if [ -z "$WRAPPER_JAR_PATH" ]; then
-  echo "Creating gradle wrapper..."
-  # 初始化 gradle wrapper
-  if command -v gradle >/dev/null 2>&1; then
-    gradle wrapper
-  else
-    # 如果系统没有安装 gradle，下载并使用临时安装
-    echo "Downloading Gradle..."
-    mkdir -p /tmp/gradle-tmp
-    cd /tmp/gradle-tmp
-    wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
-    unzip -q gradle-8.5-bin.zip
-    export PATH="/tmp/gradle-tmp/gradle-8.5/bin:$PATH"
-    cd "$GITHUB_WORKSPACE"
-    gradle wrapper
-  fi
-  WRAPPER_JAR_PATH=$(find . -name "gradle-wrapper.jar" -type f | head -n 1)
-fi
-
-# Execute the wrapper
-if [ -n "$WRAPPER_JAR_PATH" ]; then
-  java -jar "$WRAPPER_JAR_PATH" "$@"
-else
-  echo "Error: Could not find gradle wrapper jar"
-  exit 1
-fi
-EOF
-            chmod +x gradlew
-            echo "Created gradlew script with automatic initialization capability"
-          fi
-        else
-          echo "No build.gradle found, checking for alternative configurations..."
-          # 检查是否是其他类型的项目
-          if [ -f "package.json" ]; then
-            echo "This appears to be a Node.js project, not an Android/Gradle project"
-            exit 1
-          elif [ -f "pom.xml" ]; then
-            echo "This appears to be a Maven project, not a Gradle project"
-            exit 1
-          else
-            echo "No recognized build configuration found"
-            exit 1
-          fi
-        fi
-
-    - name: Final check for gradlew
-      run: |
-        if [ -f "./gradlew" ]; then
-          echo "gradlew exists and is executable"
-          ls -la ./gradlew
-          echo "Making sure it's executable..."
-          chmod +x ./gradlew
-        else
-          echo "Error: gradlew still does not exist after attempts to create it"
-          pwd
-          ls -la
-          exit 1
-        fi
-
-    - name: Validate Gradle wrapper
-      run: ./gradlew -v
-
-    - name: Cache Gradle packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
-
-    - name: Run tests
-      run: ./gradlew test --stacktrace
-
-    - name: Build with Gradle
-      run: ./gradlew build --no-daemon
-
-    - name: Generate APK
-      run: ./gradlew assembleDebug --no-daemon
-
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: debug-apk
-        path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: easycontrol-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
