@@ -1,0 +1,52 @@
+name: Build EasyControl APK (Patched)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # === 修复 1: 构建 server 模块并放入 raw 资源 ===
+      - name: Build server module and prepare raw resource
+        working-directory: ./easycontrol
+        run: |
+          chmod +x gradlew
+          ./gradlew :server:assembleRelease --no-daemon
+          mkdir -p app/src/main/res/raw
+          cp server/build/outputs/aar/server-release.aar app/src/main/res/raw/easycontrol_server.jar
+
+      # === 修复 2: 移除 ActiveHelper 引用（关键！）===
+      - name: Patch ActiveActivity.java to remove ActiveHelper
+        run: |
+          FILE="easycontrol/app/src/main/java/top/saymzx/easycontrol/app/ActiveActivity.java"
+          # 注释掉 import
+          sed -i 's/import top.saymzx.easycontrol.app.helper.ActiveHelper;/\/\/ import removed: ActiveHelper;/' "$FILE"
+          # 替换 active() 调用为 true
+          sed -i 's/ActiveHelper.active(activeKey)/true/g' "$FILE"
+          # 替换 deactivate() 调用为 true
+          sed -i 's/ActiveHelper.deactivate(AppData.setting.getActiveKey())/true/g' "$FILE"
+
+      - name: Build Debug APK
+        working-directory: ./easycontrol
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: easycontrol-debug-patched-apk
+          path: easycontrol/app/build/outputs/apk/debug/app-debug.apk
