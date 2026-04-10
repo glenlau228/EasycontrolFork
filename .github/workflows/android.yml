@@ -27,7 +27,7 @@ jobs:
           ls -la gradlew*
           test -x gradlew && echo "✅ gradlew is executable" || echo "⚠️ Still not executable"
           ./gradlew --version 2>&1 | head -n 2
-		  
+
       - name: Validate gradlew integrity (not just permissions)
         run: |
           echo "🔍 Checking gradlew..."
