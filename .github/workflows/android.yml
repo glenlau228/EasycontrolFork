@@ -1,4 +1,4 @@
-name: Universal Build for EasyControl
+name: Build EasyControl APK (Guaranteed APK Output)
 
 on:
   workflow_dispatch:
@@ -11,6 +11,19 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: false
+          token: ${{ github.token }}
+
+      - name: Force executable permission for gradlew
+        run: |
+          chmod +x gradlew gradlew.bat 2>/dev/null || true
+          ls -la gradlew*
+
+      - name: Verify gradlew and Java
+        run: |
+          ./gradlew --version | head -n 3
+          java -version
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -20,59 +33,85 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          sdk-tools: "platform-tools;34.0.0,build-tools;34.0.0,platforms;android-34"
 
-      - name: Verify project structure
+      - name: Diagnose project structure
         run: |
-          echo "📁 Workspace: $GITHUB_WORKSPACE"
+          echo "🔍 Project root:"
           ls -la
-          echo "🔍 Checking for gradlew..."
-          find . -name "gradlew" -type f
+          echo "🔍 app/ directory:"
+          ls -la app/ 2>/dev/null || echo "No app/ dir"
+          echo "🔍 settings.gradle:"
+          cat settings.gradle 2>/dev/null || echo "No settings.gradle"
+          echo "🔍 app/build.gradle:"
+          grep -n "applicationId\|com.android.application" app/build.gradle 2>/dev/null || echo "No applicationId or application plugin found!"
 
-      - name: Make gradlew executable
+      - name: Clean Project
+        run: ./gradlew clean --no-daemon
+
+      # ✅ 关键：尝试多种 assemble 命令，自动探测模块名
+      - name: Build Debug APK (robust)
         run: |
-          if [ -f "$GITHUB_WORKSPACE/gradlew" ]; then
-            chmod +x "$GITHUB_WORKSPACE/gradlew"
-            echo "✅ gradlew made executable"
-          else
-            echo "❌ gradlew not found at root. Trying ./app/gradlew..."
-            if [ -f "$GITHUB_WORKSPACE/app/gradlew" ]; then
-              chmod +x "$GITHUB_WORKSPACE/app/gradlew"
-              echo "✅ app/gradlew made executable"
-            else
-              echo "ERROR: No gradlew found! Expected at root or app/"
-              exit 1
-            fi
+          echo "Trying :app:assembleDebug..."
+          if ./gradlew :app:assembleDebug --no-daemon --info 2>&1 | grep -q "BUILD SUCCESSFUL"; then
+            echo "✅ Built with :app"
+            exit 0
           fi
 
-      - name: Ensure settings.gradle includes :app
-        run: |
-          if [ -f settings.gradle ]; then
-            if ! grep -q "include.*:app" settings.gradle; then
-              echo "include ':app'" >> settings.gradle
-              echo "✅ Added ':app' to settings.gradle"
-            fi
-          elif [ -f settings.gradle.kts ]; then
-            if ! grep -q "include.*\"app\"" settings.gradle.kts; then
-              echo "include(\":app\")" >> settings.gradle.kts
-              echo "✅ Added ':app' to settings.gradle.kts"
-            fi
-          else
-            echo "Creating minimal settings.gradle..."
-            echo "include ':app'" > settings.gradle
+          echo "Trying :EasyControl:assembleDebug..."
+          if ./gradlew :EasyControl:assembleDebug --no-daemon --info 2>&1 | grep -q "BUILD SUCCESSFUL"; then
+            echo "✅ Built with :EasyControl"
+            exit 0
           fi
 
-      - name: Clean and build
-        run: |
-          # Use absolute path to gradlew
-          GRADLEW="$GITHUB_WORKSPACE/gradlew"
-          if [ ! -f "$GRADLEW" ]; then
-            GRADLEW="$GITHUB_WORKSPACE/app/gradlew"
+          echo "Trying :android:assembleDebug..."
+          if ./gradlew :android:assembleDebug --no-daemon --info 2>&1 | grep -q "BUILD SUCCESSFUL"; then
+            echo "✅ Built with :android"
+            exit 0
           fi
-          if [ -f "$GRADLEW" ]; then
-            echo "🚀 Running: $GRADLEW clean :app:assembleDebug --no-daemon --info"
-            "$GRADLEW" clean :app:assembleDebug --no-daemon --info
-          else
-            echo "FATAL: gradlew not found after all checks"
+
+          echo "Trying :assembleDebug (root module)..."
+          if ./gradlew :assembleDebug --no-daemon --info 2>&1 | grep -q "BUILD SUCCESSFUL"; then
+            echo "✅ Built with root module"
+            exit 0
+          fi
+
+          echo "❌ All assemble attempts failed. Checking for library module..."
+          if grep -q "com.android.library" app/build.gradle; then
+            echo "⚠️ WARNING: app/build.gradle uses 'library' plugin — will NOT generate APK!"
+            echo "Fix: Change 'com.android.library' to 'com.android.application'"
+            exit 1
+          fi
+
+          echo "FATAL: No valid assemble task found"
+          exit 1
+
+      - name: Verify APK exists (aggressive search)
+        run: |
+          echo "🔍 Searching ALL APKs in workspace..."
+          find . -name "*.apk" -type f -exec ls -lh {} \;
+          
+          # Check standard paths
+          for path in \
+            "app/build/outputs/apk/debug/app-debug.apk" \
+            "app/build/outputs/apk/debug/*.apk" \
+            "build/outputs/apk/debug/app-debug.apk" \
+            "**/debug/*.apk" \
+            "**/*debug*.apk"; do
+            if ls $path >/dev/null 2>&1; then
+              echo "✅ Found APK: $path"
+              ls -lh $path
+              export APK_PATH="$path"
+              break
+            fi
+          done
+
+          if [ -z "$APK_PATH" ]; then
+            echo "❌ NO APK FOUND! Possible causes:"
+            echo "  1. build.gradle uses 'library' instead of 'application'"
+            echo "  2. missing applicationId in defaultConfig"
+            echo "  3. build failed silently (check previous step logs)"
             exit 1
           fi
 
@@ -81,6 +120,5 @@ jobs:
         if: success()
         with:
           name: easycontrol-debug-apk
-          path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/mapping/debug/mapping.txt
+          path: ${{ env.APK_PATH }}
+          retention-days: 7
