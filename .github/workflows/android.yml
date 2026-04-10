@@ -1,86 +1,48 @@
-name: Build EasyControl APK
+name: Build EasyControl APK (Auto-Generate gradlew)
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
-  workflow_dispatch:  # 手动触发支持
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # 允许上传 Release
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17 (required for modern Android)
+      - name: Install JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Verify project structure
+      - name: Generate gradlew scripts
         run: |
-          echo "Project root:"
-          ls -la
-          echo "app directory:"
-          ls -la app/
-          echo "Gradle version:"
+          # 创建 gradlew (Linux)
+          echo '#!/bin/sh' > gradlew
+          echo 'java -jar gradle/wrapper/gradle-wrapper.jar "$@"' >> gradlew
+          chmod +x gradlew
+
+          # 创建 gradlew.bat (Windows, for compatibility)
+          echo '@echo off' > gradlew.bat
+          echo 'java -jar gradle\wrapper\gradle-wrapper.jar %*' >> gradlew.bat
+
+          # 验证
+          ls -la gradlew gradlew.bat
           ./gradlew --version
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          sdk-tools: "platform-tools;34.0.0,build-tools;34.0.0,platforms;android-34"
 
       - name: Build Debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Build Release APK (unsigned)
-        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
-
-      - name: Upload Debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: easycontrol-debug.apk
           path: app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Upload Release APK (unsigned)
-        uses: actions/upload-artifact@v4
-        with:
-          name: easycontrol-release-unsigned.apk
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
-
-      # 👇 可选：如果需要签名 Release APK，请启用下方步骤并配置 Secrets
-      # - name: Create key.properties (if signing needed)
-      #   if: env.SIGN_RELEASE == 'true'
-      #   run: |
-      #     mkdir -p app
-      #     echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > app/key.properties
-      #     echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> app/key.properties
-      #     echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> app/key.properties
-      #     echo "storeFile=keystore.jks" >> app/key.properties
-
-      # - name: Decode keystore (if signing needed)
-      #   if: env.SIGN_RELEASE == 'true'
-      #   run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/keystore.jks
-
-      # - name: Build Signed Release APK
-      #   if: env.SIGN_RELEASE == 'true'
-      #   run: ./gradlew :app:assembleRelease --no-daemon
-
-      # - name: Upload Signed APK
-      #   if: env.SIGN_RELEASE == 'true'
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: easycontrol-release-signed.apk
-      #     path: app/build/outputs/apk/release/app-release.apk
-
-      - name: Cleanup
-        run: rm -rf ~/.gradle/caches
