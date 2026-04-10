@@ -1,31 +1,68 @@
-name: Build Android APK
+name: Android CI Full
 
 on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch:   # 支持手动触发
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+      GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout source
+      uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ github.workspace }}/.gradle/caches
+          ${{ github.workspace }}/.gradle/wrapper
+        key: gradle-cache-${{ runner.os }}-${{ hashFiles('**/gradle-wrapper.properties') }}-${{ hashFiles('**/*.gradle*') }}
 
-      - name: Make gradlew executable
-        run: chmod +x gradlew
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
+    - name: Install Android SDK commandline tools
+      run: |
+        mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+        cd "$ANDROID_SDK_ROOT"
+        curl -sSfL "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip" -o cmdline.zip
+        unzip -q cmdline.zip -d cmdline-tools
+        mv cmdline-tools/cmdline-tools cmdline-tools/latest || true
+        rm cmdline.zip
+      shell: bash
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: easycontrol-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+    - name: Install required Android SDK components
+      run: |
+        yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;25.2.9519653" "extras;google;m2repository" "extras;android;m2repository"
+      shell: bash
+
+    - name: Accept Android SDK licenses
+      run: |
+        yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses --sdk_root="$ANDROID_SDK_ROOT"
+      shell: bash
+
+    - name: Grant execute permission for Gradlew
+      run: chmod +x ./gradlew
+
+    - name: Build Debug APK with verbose logs
+      run: ./gradlew assembleDebug --no-daemon --stacktrace --info
+      env:
+        ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        JAVA_HOME: ${{ env.JAVA_HOME }}
+
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: EasycontrolFork-APK
+        path: app/build/outputs/apk/debug/*.apk
