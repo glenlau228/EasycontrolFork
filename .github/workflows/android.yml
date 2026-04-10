@@ -1,4 +1,4 @@
-name: Build EasyControl APK (Fixed Permissions)
+name: Universal Build for EasyControl
 
 on:
   workflow_dispatch:
@@ -11,20 +11,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          lfs: false
-          token: ${{ github.token }}
-
-      - name: Force executable permission for gradlew
-        run: |
-          touch gradlew 2>/dev/null || true
-          chmod +x gradlew gradlew.bat || echo "Ignoring chmod errors..."
-
-      - name: Verify gradlew exists and is executable
-        run: |
-          ls -la gradlew*
-          test -x gradlew && echo "✅ gradlew is executable" || echo "⚠️ Still not executable"
-          ./gradlew --version 2>&1 | head -n 2
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -34,24 +20,61 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          sdk-tools: "platform-tools;34.0.0,build-tools;34.0.0,platforms;android-34"
 
-      - name: Clean Project
-        run: ./gradlew clean --no-daemon
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace --rerun-tasks
-
-      - name: Verify APK/AAB exists
+      - name: Auto-detect and fix source location
         run: |
-          echo "🔍 Searching for build outputs..."
-          find app/build/outputs -type f \( -name "*.apk" -o -name "*.aab" \) -exec ls -lh {} \;
+          # Find where Java source files actually are
+          JAVA_SRC_PATH=$(find . -name "*.java" -path "*/src/main/java/*" -exec dirname {} \; | head -n 1 | xargs dirname | xargs dirname | xargs dirname)
+          
+          if [ "$JAVA_SRC_PATH" != "./app" ]; then
+            echo "Found Java sources at: $JAVA_SRC_PATH"
+            echo "Moving sources to app/src/main/java/"
+            
+            # Create app directory if it doesn't exist
+            mkdir -p app/src/main/java
+            
+            # Move all Java source files
+            if [ -d "$JAVA_SRC_PATH/src/main/java" ]; then
+              cp -r "$JAVA_SRC_PATH/src/main/java/"* app/src/main/java/
+            fi
+            
+            # Copy other necessary source files
+            for dir in res assets manifest; do
+              if [ -d "$JAVA_SRC_PATH/src/main/$dir" ]; then
+                mkdir -p app/src/main/$dir
+                cp -r "$JAVA_SRC_PATH/src/main/$dir/"* app/src/main/$dir/
+              fi
+            done
+            
+            # Copy AndroidManifest.xml if it's in the original location
+            if [ -f "$JAVA_SRC_PATH/src/main/AndroidManifest.xml" ]; then
+              cp "$JAVA_SRC_PATH/src/main/AndroidManifest.xml" app/src/main/
+            fi
+          fi
 
-      - name: Upload APK/AAB
+      - name: Ensure correct build configuration
+        run: |
+          # Ensure app/build.gradle has proper configuration
+          if [ -f "app/build.gradle" ]; then
+            # Add sourceSets if not present
+            if ! grep -q "sourceSets" app/build.gradle; then
+              sed -i '/android {/a \
+          sourceSets {\
+              main {\
+                  java.srcDirs = ["src/main/java"]\
+              }\
+          }' app/build.gradle
+            fi
+          fi
+
+      - name: Clean and build
+        run: ./gradlew clean :app:assembleDebug --no-daemon --info
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: easycontrol-debug
-          path: |
-            app/build/outputs/apk/**/*.apk
-            app/build/outputs/bundle/**/*.aab
+          name: easycontrol-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
