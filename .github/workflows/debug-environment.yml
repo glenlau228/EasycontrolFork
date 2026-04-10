@@ -1,0 +1,63 @@
+name: Android Runner Debug
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Print basic runner info
+      run: |
+        echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+        echo "RUNNER_TEMP=$RUNNER_TEMP"
+        echo "RUNNER_TOOL_CACHE=$RUNNER_TOOL_CACHE"
+        uname -a
+        lsb_release -a || true
+        df -h .
+        free -m
+        env | sort
+      shell: bash
+
+    - name: List repository root
+      run: ls -la
+
+    - name: Check gradlew presence and permissions
+      run: |
+        if [ -f ./gradlew ]; then
+          echo "FOUND: ./gradlew"
+          ls -la ./gradlew
+          file ./gradlew
+          ./gradlew -v || true
+        else
+          echo "MISSING: ./gradlew"
+          exit 2
+        fi
+      shell: bash
+
+    - name: Check Java
+      run: |
+        java -version || true
+        javac -version || true
+      shell: bash
+
+    - name: Check Android SDK tools (sdkmanager if present)
+      run: |
+        which sdkmanager || echo "sdkmanager not found"
+        if [ -n "$ANDROID_SDK_ROOT" ]; then
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls -la "$ANDROID_SDK_ROOT" || true
+        fi
+      shell: bash
+
+    - name: Network test
+      run: |
+        curl -I -s https://dl.google.com || true
+        curl -I -s https://services.gradle.org || true
+      shell: bash
