@@ -22,7 +22,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Make gradlew executable
-        run: chmod +x ./gradlew
+        run: chmod +x "$GITHUB_WORKSPACE/gradlew"
 
       - name: Auto-detect and fix source location
         run: |
@@ -71,10 +71,9 @@ jobs:
           fi
 
       - name: Clean and build
-        run: ./gradlew clean :app:assembleDebug --no-daemon --info
+        run: "$GITHUB_WORKSPACE/gradlew" clean :app:assembleDebug --no-daemon --info
 
       - name: Upload APK
-      
         uses: actions/upload-artifact@v4
         with:
           name: easycontrol-debug-apk
