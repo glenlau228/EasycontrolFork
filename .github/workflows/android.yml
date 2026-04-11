@@ -28,8 +28,13 @@ jobs:
           chmod +x gradlew
           #./gradlew :server:assembleRelease --no-daemon
           ./gradlew :server:copyRelease --no-daemon
-          mkdir -p app/src/main/res/raw
-          cp server/build/outputs/aar/server-release.aar app/src/main/res/raw/easycontrol_server.jar
+          #mkdir -p app/src/main/res/raw
+          #cp server/build/outputs/aar/server-release.aar app/src/main/res/raw/easycontrol_server.jar
+
+      - name: Verify easycontrol_server.jar exists
+        working-directory: ./easycontrol
+        run: |
+          ls -l app/src/main/res/raw/easycontrol_server.jar
 
       # === 修复 2: 移除 ActiveHelper 引用（关键！）===
       - name: Patch ActiveActivity.java to remove ActiveHelper
