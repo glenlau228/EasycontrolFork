@@ -51,6 +51,15 @@ jobs:
         working-directory: ./easycontrol
         run: ./gradlew assembleDebug --no-daemon
 
+      - name: Check if app-debug.apk exists
+        working-directory: ./easycontrol
+        run: |
+          echo "🔍 Looking for APK in debug folder..."
+          ls -la app/build/outputs/apk/debug/
+          echo ""
+          echo "🔍 All APK files in outputs:"
+          find app/build/outputs -name "*.apk" | xargs ls -lh
+
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
